@@ -1,43 +1,59 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "../../../../lib/auth";
 import { prisma } from "../../../../lib/prisma";
 
+// Ensure Next never tries to pre-render/collect data for this route at build time
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const runtime = "nodejs";
+
+function csvEscape(v) {
+  const s = String(v ?? "");
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
 export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const user = await prisma.user.findUnique({ where: { email: session.user.email }});
-  if (!user || user.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
+  // IMPORTANT: DB queries must be inside the handler (not at top-level)
   const orders = await prisma.order.findMany({
-    include: { user: true, items: true },
-    orderBy: { createdAt: "desc" }
+    include: {
+      user: true,
+      items: { include: { service: true } },
+      payments: true,
+    },
+    orderBy: { createdAt: "desc" },
   });
 
-  const header = ["orderId","createdAt","status","totalEUR","fullName","email","phone","linkedinUrl","services","paymentRef","resumeUrl"];
-  const rows = orders.map((o) => ([
-    o.id,
-    o.createdAt.toISOString(),
-    o.status,
-    (o.totalCents/100).toFixed(2),
-    o.fullName || o.user?.name || "",
-    o.user?.email || "",
-    o.phone || o.user?.phone || "",
-    o.linkedinUrl || o.user?.linkedinUrl || "",
-    o.items.map(i => i.title).join(" | "),
-    o.paymentRef || "",
-    o.resumeFileUrl || ""
-  ]));
+  const header = [
+    "orderId",
+    "status",
+    "createdAt",
+    "customerEmail",
+    "customerName",
+    "itemsCount",
+    "paymentProvider",
+    "paymentReference",
+  ];
 
-  const csv = [header, ...rows]
-    .map((r) => r.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))
-    .join("\n");
+  const rows = orders.map((o) => {
+    const p = o.payments?.[0];
+    return [
+      o.id,
+      o.status,
+      o.createdAt?.toISOString?.() ?? "",
+      o.user?.email ?? "",
+      o.user?.name ?? "",
+      o.items?.length ?? 0,
+      p?.provider ?? "",
+      p?.reference ?? "",
+    ];
+  });
+
+  const csv = [header, ...rows].map((r) => r.map(csvEscape).join(",")).join("\n");
 
   return new NextResponse(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="hope_irl_orders_${Date.now()}.csv"`
-    }
+      "Content-Disposition": `attachment; filename="hope_irl_export.csv"`,
+      "Cache-Control": "no-store",
+    },
   });
 }
