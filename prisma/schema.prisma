@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrderStatus {
+  draft
+  awaiting_payment
+  payment_submitted
+  paid
+  in_progress
+  completed
+  cancelled
+}
+
+model User {
+  id            String   @id @default(cuid())
+  name          String?
+  email         String   @unique
+  phone         String?
+  image         String?
+  role          String   @default("user")
+  passwordHash  String?
+  linkedinUrl   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  orders        Order[]
+  notesAuthored OrderNote[] @relation("NoteAuthor")
+  resumes       Resume[]
+  deleteRequest DeleteRequest?
+}
+
+model Order {
+  consultantId    String?
+  consultant      Consultant? @relation(fields: [consultantId], references: [id])
+  id              String      @id @default(cuid())
+  userId          String
+  user            User        @relation(fields: [userId], references: [id])
+  status          OrderStatus @default(draft)
+  currency        String      @default("EUR")
+  totalCents      Int         @default(0)
+  fullName        String?
+  phone           String?
+  linkedinUrl     String?
+  resumeFileName  String?
+  resumeFileUrl   String?
+  paymentProvider String?     @default("revolut")
+  paymentLink     String?
+  paymentRef      String?
+  paidAt          DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  items           OrderItem[]
+  notes           OrderNote[]
+  resumes         Resume[]
+}
+
+model OrderItem {
+  id         String   @id @default(cuid())
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  serviceId  String
+  title      String
+  priceCents Int
+  period     String
+}
+
+model Consultant {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  createdAt DateTime @default(now())
+  orders    Order[]
+}
+
+model OrderNote {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation("NoteAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+}
+
+model Resume {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderId         String?
+  order           Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  fileName        String
+  fileUrl         String
+  storageProvider String   @default("local")
+  createdAt       DateTime @default(now())
+}
+
+enum DeleteRequestStatus {
+  requested
+  processed
+}
+
+model DeleteRequest {
+  id          String              @id @default(cuid())
+  userId      String              @unique
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reason      String?
+  status      DeleteRequestStatus @default(requested)
+  createdAt   DateTime            @default(now())
+  processedAt DateTime?
+}
+
+model Account {
+  id                 String  @id @default(cuid())
+  userId             String
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String? @db.Text
+  access_token       String? @db.Text
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String? @db.Text
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
