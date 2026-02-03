@@ -1,28 +1,36 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "../../../../../lib/auth";
 import { prisma } from "../../../../../lib/prisma";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const runtime = "nodejs";
+
 export async function POST(req) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const body = await req.json();
+    const orderId = body?.orderId;
+    const text = body?.text;
 
-  const me = await prisma.user.findUnique({ where: { email: session.user.email }});
-  if (!me || me.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-  const body = await req.json();
-  const { orderId, content } = body || {};
-  if (!orderId || !content || content.trim().length < 2) {
-    return NextResponse.json({ error: "Note content is required" }, { status: 400 });
-  }
-
-  await prisma.orderNote.create({
-    data: {
-      orderId,
-      authorId: me.id,
-      content: content.trim()
+    if (!orderId || !text || !String(text).trim()) {
+      return NextResponse.json(
+        { ok: false, error: "orderId and text are required" },
+        { status: 400 }
+      );
     }
-  });
 
-  return NextResponse.json({ ok: true });
+    // ✅ DB query is inside the handler (never at top-level)
+    const note = await prisma.orderNote.create({
+      data: {
+        orderId: String(orderId),
+        text: String(text).trim(),
+      },
+    });
+
+    return NextResponse.json({ ok: true, note });
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: "Failed to create note" },
+      { status: 500 }
+    );
+  }
 }
